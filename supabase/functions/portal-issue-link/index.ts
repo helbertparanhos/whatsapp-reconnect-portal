@@ -22,6 +22,7 @@ import { preflight, isOriginAllowed } from "../_shared/cors.ts";
 import { json, fail, readJson, clientIp, requiredString, type ResponseContext } from "../_shared/http.ts";
 import { generateToken, hashToken, hashIp, timingSafeEqual, resolveTtlMinutes } from "../_shared/token.ts";
 import { createDb, findActiveInstance, issueToken } from "../_shared/db.ts";
+import { getAdapter } from "../_shared/adapters/registry.ts";
 import { record } from "../_shared/audit.ts";
 
 declare const Deno: { serve(h: (req: Request) => Promise<Response> | Response): void };
@@ -80,9 +81,14 @@ Deno.serve(async (req: Request) => {
     }
 
     // ---- entrada -----------------------------------------------------------
-    const body = await readJson<{ instance?: unknown; ttl_minutes?: unknown }>(req);
+    const body = await readJson<{ instance?: unknown; ttl_minutes?: unknown; check_only?: unknown }>(req);
     externalId = requiredString(body.instance, "instance");
     const ttlMinutes = resolveTtlMinutes(body.ttl_minutes);
+    // check_only: modo de monitoramento. So consulta o status do provider e NAO
+    // emite token. O monitor (n8n) usa isso a cada ciclo; so pede a emissao de
+    // fato quando decide avisar. Assim o token nasce fresco no aviso e nao e
+    // rotacionado a cada checagem — o que invalidaria um link ja enviado.
+    const checkOnly = body.check_only === true;
 
     // ---- instancia ---------------------------------------------------------
     const instance = await findActiveInstance(db, externalId);
@@ -105,6 +111,33 @@ Deno.serve(async (req: Request) => {
         detail: `provider ${instance.provider} sem credencial utilizavel`,
       });
       return fail(ctx, "no_credentials");
+    }
+
+    // ---- modo monitor: so status, sem emitir token -------------------------
+    if (checkOnly) {
+      const adapter = getAdapter(instance.provider);
+      let status = "disconnected";
+      try {
+        status = (await adapter.status({
+          externalId: instance.external_id,
+          baseUrl: instance.base_url,
+          credentials: instance.credentials,
+        })).status;
+      } catch (e) {
+        // Provider fora do ar na checagem: registra e devolve provider_error,
+        // para o monitor distinguir "caiu" de "nao consegui checar".
+        const err = toAppError(e);
+        await record(db, {
+          externalId, instanceId: instance.id, action: "status", outcome: "provider_error",
+          ipHash, detail: err.detail,
+        });
+        return fail(ctx, "provider_error");
+      }
+      await record(db, {
+        externalId, instanceId: instance.id, action: "status", outcome: "ok", ipHash,
+        detail: `check_only status=${status}`,
+      });
+      return json(ctx, { status, label: instance.label });
     }
 
     // ---- emissao -----------------------------------------------------------
