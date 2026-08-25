@@ -1,0 +1,21 @@
+# Configuracao das Edge Functions do QR Pair Portal.
+#
+# `verify_jwt = false` em todas: o projeto nao tem login, e a autorizacao e o
+# token do link (portal-session/connect/status) ou o segredo de emissao
+# (portal-issue-link). Nao ha JWT de usuario para verificar — ver 03-spec.md
+# §Autenticacao e autorizacao.
+#
+# `project_id` e preenchido por quem faz o deploy, no proprio ambiente.
+
+[functions.portal-session]
+verify_jwt = false
+
+[functions.portal-connect]
+verify_jwt = false
+
+[functions.portal-status]
+verify_jwt = false
+
+# Protegida por x-portal-secret, comparado em tempo constante (FR-14, SEC-06).
+[functions.portal-issue-link]
+verify_jwt = false

@@ -1,0 +1,4 @@
+# Toda URL deste site e um link privado de vida curta.
+# Indexar exporia identificadores de instancia em mecanismo de busca.
+User-agent: *
+Disallow: /

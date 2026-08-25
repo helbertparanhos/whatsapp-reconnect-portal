@@ -1,0 +1,121 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# Sem segredo em nenhum job. O CI verifica codigo publico; nada aqui precisa
+# falar com banco de producao nem com provider.
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  front:
+    name: Typecheck, testes e bundle
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - run: npm ci
+
+      - name: Typecheck
+        run: npx tsc --noEmit -p tsconfig.app.json
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Testes
+        run: npm test
+
+      - name: Build
+        run: npm run build
+        env:
+          # Placeholders: o bundle e verificado, nao publicado. Valor real de
+          # producao entra no deploy, nunca aqui.
+          VITE_SUPABASE_URL: https://exemplo.supabase.co
+          VITE_SUPABASE_PUBLISHABLE_KEY: chave-publicavel-de-ci
+
+      # Ultima barreira entre um segredo e a internet (FR-13).
+      - name: Varredura de segredo no bundle
+        run: node scripts/check-bundle.mjs
+
+  functions:
+    name: Edge Functions
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+
+      # Paga a divida registrada em 05-build.md: `supabase/functions/**` nao
+      # entra no tsc do projeto porque usa import por URL. O deno resolve.
+      - name: Typecheck das funcoes
+        run: deno check supabase/functions/**/index.ts
+
+      - name: Formatacao
+        run: deno fmt --check supabase/functions/ || true
+
+  seguranca:
+    name: Barreiras de seguranca no codigo
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Regras de 03-estrutura.md que so um humano distraido quebra — e por isso
+      # precisam de verificacao automatica.
+      - name: Nenhum catch vazio
+        # O filtro de comentario nao e detalhe: varios arquivos EXPLICAM, em
+        # comentario, que um `catch {}` foi a causa do R-01 ficar escondido.
+        # Sem o filtro, a documentacao do bug reprova o build.
+        run: |
+          if grep -rEn 'catch\s*(\([^)]*\))?\s*\{\s*\}' src supabase/functions \
+               --include='*.ts' --include='*.tsx' \
+             | grep -vE ':[0-9]+:[[:space:]]*(\*|//|/\*)'; then
+            echo "::error::catch vazio encontrado. Todo erro vira estado visivel ou registro (R-02)."
+            exit 1
+          fi
+          echo "OK: nenhum catch vazio."
+
+      - name: Nenhum segredo com prefixo VITE_
+        run: |
+          if grep -rEn 'VITE_[A-Z_]*(SECRET|SERVICE_ROLE|PRIVATE|PASSWORD)' src .env.example; then
+            echo "::error::Variavel VITE_ com nome de segredo. Tudo com esse prefixo vai para o bundle."
+            exit 1
+          fi
+          echo "OK: nenhum segredo com prefixo VITE_."
+
+      - name: Nenhuma migration altera tabela de terceiro
+        # O banco pode ser compartilhado e ter automacoes nao mapeadas
+        # consumindo-o. Nenhuma migration deste projeto toca tabela que ele nao
+        # criou (ADR-004) — e essa e a verificacao que impede um descuido.
+        run: |
+          if grep -rEni '^[[:space:]]*(alter|drop)[[:space:]]+table' supabase/migrations \
+             | grep -vi 'portal_'; then
+            echo "::error::Migration tocando tabela fora do prefixo portal_ (ADR-004)."
+            exit 1
+          fi
+          echo "OK: nenhuma migration fora do prefixo portal_."
+
+      - name: Nenhum segredo versionado
+        run: |
+          if git ls-files | grep -E '(^|/)\.env$'; then
+            echo "::error::.env versionado. Use .env.example com placeholders."
+            exit 1
+          fi
+          if grep -rE 'eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}'                --include='*.ts' --include='*.tsx' --include='*.sql'                --include='*.json' --include='*.md'                src supabase scripts docs 2>/dev/null; then
+            echo "::error::JWT em arquivo versionado."
+            exit 1
+          fi
+          echo "OK: nenhum segredo versionado."
