@@ -31,3 +31,6 @@ dist-ssr
 
 # artefatos de cobertura
 coverage/
+
+# config de MCP com token — NUNCA versionar
+.mcp.json

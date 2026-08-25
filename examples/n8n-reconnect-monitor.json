@@ -1,0 +1,259 @@
+{
+  "name": "Portal de Reconexao — Monitor (exemplo)",
+  "nodes": [
+    {
+      "id": "1",
+      "name": "Cron 15 min",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [0, 300],
+      "parameters": {
+        "rule": { "interval": [{ "field": "minutes", "minutesInterval": 15 }] }
+      }
+    },
+    {
+      "id": "2",
+      "name": "Config",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [220, 300],
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            { "id": "a", "name": "portal_url", "value": "https://SEU-PROJETO.supabase.co/functions/v1", "type": "string" },
+            { "id": "b", "name": "anon_key", "value": "sua-chave-publicavel-anon", "type": "string" },
+            { "id": "c", "name": "instance", "value": "SUA_INSTANCIA", "type": "string" },
+            { "id": "d", "name": "notify_target", "value": "SEU_GRUPO@g.us", "type": "string" },
+            { "id": "e", "name": "state_key", "value": "reconexao:SUA_INSTANCIA", "type": "string" }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "3",
+      "name": "Janela de horario?",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [440, 300],
+      "parameters": {
+        "jsCode": "// Opcional: so avisa em horario comercial (08h-23h America/Sao_Paulo).\n// Ajuste ou remova conforme a sua operacao.\nconst h = Number(new Date().toLocaleString('en-US',{timeZone:'America/Sao_Paulo',hour:'2-digit',hour12:false}));\nreturn [{ json: { ...$json, dentro_janela: h>=8 && h<23 } }];"
+      }
+    },
+    {
+      "id": "4",
+      "name": "Dentro do horario?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [660, 300],
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "typeValidation": "strict", "version": 2 },
+          "conditions": [
+            { "id": "x", "leftValue": "={{ $json.dentro_janela }}", "rightValue": "", "operator": { "type": "boolean", "operation": "true", "singleValue": true } }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "5",
+      "name": "Checa status (portal)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [880, 300],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Config').first().json.portal_url }}/portal-issue-link",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "apikey", "value": "={{ $('Config').first().json.anon_key }}" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ instance: $('Config').first().json.instance, check_only: true }) }}",
+        "options": {}
+      }
+    },
+    {
+      "id": "6",
+      "name": "Conectada?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [1100, 300],
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "typeValidation": "strict", "version": 2 },
+          "conditions": [
+            { "id": "y", "leftValue": "={{ $json.status }}", "rightValue": "connected", "operator": { "type": "string", "operation": "equals" } }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "7",
+      "name": "Ja avisou? (Redis)",
+      "type": "n8n-nodes-base.redis",
+      "typeVersion": 1,
+      "position": [1320, 420],
+      "parameters": {
+        "operation": "get",
+        "propertyName": "avisado",
+        "key": "={{ $('Config').first().json.state_key }}",
+        "options": {}
+      }
+    },
+    {
+      "id": "8",
+      "name": "Primeiro aviso?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [1540, 420],
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "typeValidation": "loose", "version": 2 },
+          "conditions": [
+            { "id": "z", "leftValue": "={{ $json.avisado }}", "rightValue": "", "operator": { "type": "string", "operation": "empty", "singleValue": true } }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "9",
+      "name": "Emite link (portal)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1760, 360],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Config').first().json.portal_url }}/portal-issue-link",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "apikey", "value": "={{ $('Config').first().json.anon_key }}" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ instance: $('Config').first().json.instance }) }}",
+        "options": {}
+      }
+    },
+    {
+      "id": "10",
+      "name": "Envia o link (seu WhatsApp)",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [1980, 360],
+      "parameters": {}
+    },
+    {
+      "id": "11",
+      "name": "Marca avisado (Redis)",
+      "type": "n8n-nodes-base.redis",
+      "typeVersion": 1,
+      "position": [2200, 360],
+      "parameters": {
+        "operation": "set",
+        "key": "={{ $('Config').first().json.state_key }}",
+        "value": "={{ $now.toISO() }}",
+        "keyType": "string",
+        "expire": true,
+        "ttl": 86400
+      }
+    },
+    {
+      "id": "12",
+      "name": "Silencio",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [1760, 500],
+      "parameters": {}
+    },
+    {
+      "id": "13",
+      "name": "Estava caida? (Redis)",
+      "type": "n8n-nodes-base.redis",
+      "typeVersion": 1,
+      "position": [1320, 180],
+      "parameters": {
+        "operation": "get",
+        "propertyName": "avisado",
+        "key": "={{ $('Config').first().json.state_key }}",
+        "options": {}
+      }
+    },
+    {
+      "id": "14",
+      "name": "Voltou agora?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [1540, 180],
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "typeValidation": "loose", "version": 2 },
+          "conditions": [
+            { "id": "w", "leftValue": "={{ $json.avisado }}", "rightValue": "", "operator": { "type": "string", "operation": "notEmpty", "singleValue": true } }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "15",
+      "name": "Avisa reconectado (seu WhatsApp)",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [1760, 120],
+      "parameters": {}
+    },
+    {
+      "id": "16",
+      "name": "Limpa estado (Redis)",
+      "type": "n8n-nodes-base.redis",
+      "typeVersion": 1,
+      "position": [1980, 120],
+      "parameters": {
+        "operation": "delete",
+        "key": "={{ $('Config').first().json.state_key }}"
+      }
+    },
+    {
+      "id": "17",
+      "name": "Segue conectada",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [1760, 240],
+      "parameters": {}
+    }
+  ],
+  "connections": {
+    "Cron 15 min": { "main": [[{ "node": "Config", "type": "main", "index": 0 }]] },
+    "Config": { "main": [[{ "node": "Janela de horario?", "type": "main", "index": 0 }]] },
+    "Janela de horario?": { "main": [[{ "node": "Dentro do horario?", "type": "main", "index": 0 }]] },
+    "Dentro do horario?": { "main": [[{ "node": "Checa status (portal)", "type": "main", "index": 0 }], []] },
+    "Checa status (portal)": { "main": [[{ "node": "Conectada?", "type": "main", "index": 0 }]] },
+    "Conectada?": { "main": [[{ "node": "Estava caida? (Redis)", "type": "main", "index": 0 }], [{ "node": "Ja avisou? (Redis)", "type": "main", "index": 0 }]] },
+    "Ja avisou? (Redis)": { "main": [[{ "node": "Primeiro aviso?", "type": "main", "index": 0 }]] },
+    "Primeiro aviso?": { "main": [[{ "node": "Emite link (portal)", "type": "main", "index": 0 }], [{ "node": "Silencio", "type": "main", "index": 0 }]] },
+    "Emite link (portal)": { "main": [[{ "node": "Envia o link (seu WhatsApp)", "type": "main", "index": 0 }]] },
+    "Envia o link (seu WhatsApp)": { "main": [[{ "node": "Marca avisado (Redis)", "type": "main", "index": 0 }]] },
+    "Estava caida? (Redis)": { "main": [[{ "node": "Voltou agora?", "type": "main", "index": 0 }]] },
+    "Voltou agora?": { "main": [[{ "node": "Avisa reconectado (seu WhatsApp)", "type": "main", "index": 0 }], [{ "node": "Segue conectada", "type": "main", "index": 0 }]] },
+    "Avisa reconectado (seu WhatsApp)": { "main": [[{ "node": "Limpa estado (Redis)", "type": "main", "index": 0 }]] }
+  },
+  "settings": { "executionOrder": "v1" },
+  "pinData": {}
+}

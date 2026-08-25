@@ -176,6 +176,17 @@ recuperá-lo depois.
 A emissão recusa instância inativa ou sem credencial utilizável, para que a automação descubra o
 problema **antes** de mandar ao cliente um link que só falharia ao ser aberto.
 
+## Automação (monitor de reconexão)
+
+Emitir um link é uma chamada HTTP — qualquer agendador serve. Em [`examples/`](examples/) há um
+fluxo pronto de [n8n](https://n8n.io) que faz o ciclo completo: a cada 15 min consulta o status com
+`check_only` (sem gerar token) e, quando a instância cai, emite um link e o envia para onde você
+configurar, sem repetir o aviso enquanto ela seguir fora. Todos os valores no arquivo são
+placeholders — nada real viaja nele.
+
+- [examples/n8n-reconnect-monitor.json](examples/n8n-reconnect-monitor.json) — importe no n8n
+- [examples/README.md](examples/README.md) — o que preencher e onde plugar o seu envio
+
 ## Adicionando um provider
 
 Três passos, e nada mais muda:
@@ -208,6 +219,7 @@ O `Dockerfile` produz uma imagem que serve estáticos por nginx, **sem runtime N
 | [docs/estrutura.md](docs/estrutura.md) | Onde cada arquivo mora e as regras invioláveis |
 | [docs/ui.md](docs/ui.md) | As telas, os estados e os tokens de cor com contraste medido |
 | [docs/decisions/](docs/decisions/) | Seis ADRs — o **porquê** de cada decisão de arquitetura |
+| [examples/](examples/) | Fluxo de n8n de exemplo para o monitor de reconexão |
 
 Os ADRs registram alternativas consideradas e consequências aceitas. Se algo parecer estranho, é
 provável que exista um ADR explicando o que aquela escolha estava resolvendo.
