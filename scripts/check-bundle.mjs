@@ -21,7 +21,6 @@ const DIST = "dist";
  * a ser desligada.
  */
 const PADROES = [
-  { nome: "JWT (chave de servico ou anon)", re: /\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}/ },
   { nome: "chave privada PEM", re: /-----BEGIN (?:RSA |EC |OPENSSH |PGP )?PRIVATE KEY-----/ },
   { nome: "token da AWS", re: /\bAKIA[0-9A-Z]{16}\b/ },
   { nome: "chave secreta do Stripe", re: /\bsk_(?:live|test)_[A-Za-z0-9]{16,}/ },
@@ -38,6 +37,47 @@ const PADROES = [
  * cliente, dominio interno, host de ferramenta (FR-20).
  */
 const TERMOS_PROIBIDOS = [];
+
+/**
+ * Verifica JWTs no conteudo.
+ *
+ * Um JWT no bundle NAO e, por si so, um vazamento: a chave publicavel (anon) e
+ * um JWT e DEVE estar no bundle — o front a usa para atravessar o gateway. O que
+ * nao pode escapar e a chave de SERVICE ROLE, que ignora RLS.
+ *
+ * Por isso a verificacao decodifica o payload de cada JWT e so falha quando o
+ * claim `role` indica privilegio elevado. Grepar por `eyJ...` sem decodificar
+ * bloquearia a propria chave publicavel — foi o que derrubou o primeiro build.
+ *
+ * Retorna a lista de motivos de falha (vazia se tudo ok).
+ */
+function verificarJwts(conteudo) {
+  const falhas = [];
+  const re = /\beyJ[A-Za-z0-9_-]{10,}\.([A-Za-z0-9_-]{10,})\.[A-Za-z0-9_-]{10,}/g;
+  const vistos = new Set();
+
+  for (const m of conteudo.matchAll(re)) {
+    const payloadB64 = m[1];
+    if (vistos.has(payloadB64)) continue;
+    vistos.add(payloadB64);
+
+    let role = null;
+    try {
+      const json = JSON.parse(Buffer.from(payloadB64, "base64url").toString("utf8"));
+      role = String(json.role ?? "");
+    } catch {
+      // Nao decodificou como JSON: nao e um JWT do Supabase. Ignora — flag-la
+      // reintroduziria o falso positivo que esta funcao existe para evitar.
+      continue;
+    }
+
+    if (role === "service_role" || role === "service") {
+      falhas.push(`chave SERVICE ROLE no bundle (role=${role}) — ignora a RLS`);
+    }
+    // role === "anon" | "authenticated" | outro: e chave publicavel, esperada.
+  }
+  return falhas;
+}
 
 const EXTENSOES = new Set([".js", ".mjs", ".cjs", ".css", ".html", ".json", ".map", ".txt"]);
 
@@ -70,6 +110,11 @@ for (const arquivo of arquivos(DIST)) {
       console.error(`✗ ${arquivo}: ${nome} (${m[0].length} caracteres, valor omitido)`);
       falhas++;
     }
+  }
+
+  for (const motivo of verificarJwts(conteudo)) {
+    console.error(`✗ ${arquivo}: ${motivo}`);
+    falhas++;
   }
 
   for (const re of TERMOS_PROIBIDOS) {
